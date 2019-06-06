@@ -3,9 +3,16 @@ package org.superbiz.moviefun.albums;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+
+import javax.sql.DataSource;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 
 @Configuration
 @EnableAsync
@@ -18,17 +25,36 @@ public class AlbumsUpdateScheduler {
     private final AlbumsUpdater albumsUpdater;
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
-    public AlbumsUpdateScheduler(AlbumsUpdater albumsUpdater) {
+    private JdbcTemplate jdbc;
+
+    public AlbumsUpdateScheduler(AlbumsUpdater albumsUpdater, DataSource dataSource) {
         this.albumsUpdater = albumsUpdater;
+        jdbc = new JdbcTemplate(dataSource);
+
     }
 
-
+    private boolean startAlbumSchedulerTask() {
+        int updatedRows = jdbc.update(
+                "UPDATE album_scheduler_task" +
+                        " SET started_at = now()" +
+                        " WHERE started_at IS NULL" +
+                        " OR started_at < date_sub(now(), INTERVAL 3 MINUTE)"
+        );
+        return updatedRows > 0;
+    }
     @Scheduled(initialDelay = 15 * SECONDS, fixedRate = 2 * MINUTES)
     public void run() {
         try {
             logger.debug("Starting albums update");
-            albumsUpdater.update();
+            if (startAlbumSchedulerTask()) {
+                logger.debug("Starting albums update");
+                albumsUpdater.update();
+                logger.debug("Finished albums update");
 
+            }
+            else {
+                logger.debug("Nothing to start");
+            }
             logger.debug("Finished albums update");
 
         } catch (Throwable e) {
